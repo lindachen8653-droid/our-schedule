@@ -1,0 +1,18 @@
+{
+  "name": "Our Schedule",
+  "short_name": "Schedule",
+  "description": "工作・生活・愛的共用行事曆",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#fffaf6",
+  "theme_color": "#fff8f2",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
