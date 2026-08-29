@@ -1,0 +1,107 @@
+name: Add notification toggle
+
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - ".github/workflows/add-notification-toggle.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Add notification off toggle
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('cloud.js')
+          s=p.read_text(encoding='utf-8')
+          old="""async function sendSchedulePush(change) {
+  if (!change || !activeSpace || !session) return;
+  try {
+    await supabase.functions.invoke('send-schedule-push', { body:{ space_id:activeSpace.space_id, action:change.action, event:change.event } });
+  } catch {}
+}
+cloudNotify.addEventListener('click', async () => {
+  try {
+    const ok = await ensurePushSubscription(true);
+    if (ok) showToast('通知已開啟。對方新增、修改或刪除行程時會收到推播。');
+  } catch (error) { showToast(friendlyError(error)); }
+});"""
+          new="""async function sendSchedulePush(change) {
+  if (!change || !activeSpace || !session) return;
+  try {
+    await supabase.functions.invoke('send-schedule-push', { body:{ space_id:activeSpace.space_id, action:change.action, event:change.event } });
+  } catch {}
+}
+async function getCurrentPushSubscription() {
+  if (!('serviceWorker' in navigator) || !('PushManager' in window)) return null;
+  const reg = await navigator.serviceWorker.ready;
+  return reg.pushManager.getSubscription();
+}
+async function refreshNotifyButton() {
+  try {
+    const sub = await getCurrentPushSubscription();
+    cloudNotify.textContent = sub ? '🔔 已開啟' : '🔕 已關閉';
+    cloudNotify.dataset.enabled = sub ? '1' : '0';
+  } catch {
+    cloudNotify.textContent = '🔔 通知';
+    cloudNotify.dataset.enabled = '0';
+  }
+}
+async function disablePushSubscription() {
+  const sub = await getCurrentPushSubscription();
+  if (!sub) {
+    cloudNotify.textContent = '🔕 已關閉';
+    cloudNotify.dataset.enabled = '0';
+    return true;
+  }
+  const endpoint = sub.endpoint;
+  const { error } = await supabase.from('push_subscriptions').delete().eq('endpoint', endpoint).eq('user_id', session.user.id);
+  if (error) throw error;
+  await sub.unsubscribe();
+  cloudNotify.textContent = '🔕 已關閉';
+  cloudNotify.dataset.enabled = '0';
+  return true;
+}
+cloudNotify.addEventListener('click', async () => {
+  try {
+    const sub = await getCurrentPushSubscription();
+    if (sub) {
+      if (!confirm('要關閉這台裝置的 Our Schedule 通知嗎？之後仍可重新開啟。')) return;
+      await disablePushSubscription();
+      showToast('這台裝置的通知已關閉。');
+      return;
+    }
+    const ok = await ensurePushSubscription(true);
+    if (ok) {
+      cloudNotify.dataset.enabled = '1';
+      showToast('通知已開啟。對方新增、修改或刪除行程時會收到推播。');
+    }
+  } catch (error) { showToast(friendlyError(error)); }
+});"""
+          if old not in s: raise SystemExit('notify handler anchor not found')
+          s=s.replace(old,new,1)
+          s=s.replace("    ensurePushSubscription(false).catch(()=>{});\n    return;", "    ensurePushSubscription(false).then(refreshNotifyButton).catch(refreshNotifyButton);\n    return;",1)
+          s=s.replace("  ensurePushSubscription(false).catch(()=>{});\n  setStatus('synced', '已同步');", "  ensurePushSubscription(false).then(refreshNotifyButton).catch(refreshNotifyButton);\n  setStatus('synced', '已同步');",1)
+          p.write_text(s,encoding='utf-8')
+
+          sw=Path('sw.js')
+          w=sw.read_text(encoding='utf-8').replace('our-schedule-cloud-v15-20260829','our-schedule-cloud-v16-20260829')
+          sw.write_text(w,encoding='utf-8')
+
+          idx=Path('index.html')
+          x=idx.read_text(encoding='utf-8').replace('./cloud.js?v=20260829-4','./cloud.js?v=20260829-5')
+          idx.write_text(x,encoding='utf-8')
+          PY
+      - name: Commit toggle upgrade
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add cloud.js sw.js index.html
+          git diff --cached --quiet || git commit -m "Add notification on off toggle"
+          git push
