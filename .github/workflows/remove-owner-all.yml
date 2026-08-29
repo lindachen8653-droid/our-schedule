@@ -1,0 +1,36 @@
+name: Remove owner all option
+
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - ".github/workflows/remove-owner-all.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Remove all from owner selector
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('index.html')
+          s=p.read_text(encoding='utf-8')
+          s=s.replace('<option value="shared">💛 共同</option><option value="all">✨ 全部</option>','<option value="shared">💛 共同</option>',1)
+          s=s.replace("$('#categoryOwner').value=e.owner||'all';renderCategoryOptions(e.owner||'all',e.category);","$('#categoryOwner').value=['ling','sheng','shared'].includes(e.owner)?e.owner:'ling';renderCategoryOptions($('#categoryOwner').value,e.category);",1)
+          s=s.replace("function renderCategoryOptions(owner='all',selectedId=''){const list=owner==='all'?CATEGORIES:CATEGORIES.filter(c=>c.owner===owner);$('#category').innerHTML=list.map(c=>`<option value=\"${c.id}\">${esc(c.label)}${owner==='all'?`（${ownerLabel(c.owner)}）`:''}</option>`).join('');","function renderCategoryOptions(owner='ling',selectedId=''){const list=CATEGORIES.filter(c=>c.owner===owner);$('#category').innerHTML=list.map(c=>`<option value=\"${c.id}\">${esc(c.label)}</option>`).join('');",1)
+          p.write_text(s,encoding='utf-8')
+          sw=Path('sw.js')
+          sw.write_text(sw.read_text(encoding='utf-8').replace('our-schedule-cloud-v17-20260829','our-schedule-cloud-v18-20260829'),encoding='utf-8')
+          PY
+      - name: Commit cleanup
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add index.html sw.js
+          git diff --cached --quiet || git commit -m "Remove all from owner selector"
+          git push
