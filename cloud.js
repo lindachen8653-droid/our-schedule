@@ -6,6 +6,8 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true }
 });
 
+const AUTH_REDIRECT = 'https://lindachen8653-droid.github.io/our-schedule/';
+
 const APP_KEYS = {
   events: 'ourSchedule.events.v1',
   todos: 'ourSchedule.todos.v1',
@@ -139,6 +141,7 @@ function friendlyError(error) {
   if (/user already registered/i.test(msg)) return '此 Email 已註冊，請直接登入。';
   if (/password/i.test(msg) && /characters/i.test(msg)) return '密碼長度不足，請至少輸入 6 個字元。';
   if (/invalid invite code/i.test(msg)) return '共用碼不存在，請確認後再試。';
+  if (/email rate limit|security purposes|rate limit/i.test(msg)) return '驗證信請求太頻繁，請稍候再試；若已驗證過請直接登入。';
   if (/network|fetch/i.test(msg)) return '目前無法連上雲端，請確認網路後再試。';
   return msg;
 }
@@ -175,11 +178,11 @@ function authHtml(mode = 'login') {
         const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
       } else {
-        const { data, error } = await supabase.auth.signUp({ email, password });
+        const { data, error } = await supabase.auth.signUp({ email, password, options: { emailRedirectTo: AUTH_REDIRECT } });
         if (error) throw error;
         if (!data.session) {
           message.className = 'cloud-message ok';
-          message.textContent = '註冊完成。請到信箱點擊驗證連結，再回到這裡登入。';
+          message.textContent = '註冊完成。請到信箱點擊驗證連結；若你已經驗證過，請直接切換到「已有帳號？登入」。';
           submit.disabled = false;
           return;
         }
