@@ -66,6 +66,9 @@ function applySnapshot(data) {
     suppressPush = false;
   }
 }
+function refreshAppInPlace() {
+  window.dispatchEvent(new CustomEvent('ourschedule:cloud-data'));
+}
 function clearLocalAppData() {
   suppressPush = true;
   try { WATCHED.forEach(k => removeRaw(k)); } finally { suppressPush = false; }
@@ -279,7 +282,7 @@ async function hydrateFromCloud(forceRemote = false) {
     applySnapshot(row.data || {});
     setRaw(markerKey(activeSpace.space_id), row.updated_at || '');
     setStatus('synced', '已同步');
-    location.reload();
+    refreshAppInPlace();
     return;
   }
   setStatus('synced', '已同步');
@@ -325,18 +328,18 @@ async function subscribeRealtime(spaceId) {
         showToast('另一台裝置有更新，完成編輯後可套用。');
         return;
       }
-      applyRemoteAndReload(remote);
+      applyRemoteInPlace(remote);
     })
     .subscribe(status => {
       if (status === 'SUBSCRIBED') setStatus('synced', '已同步 · 即時共用');
       if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') setStatus('error', '即時連線異常');
     });
 }
-function applyRemoteAndReload(remote) {
+function applyRemoteInPlace(remote) {
   if (!activeSpace) return;
   applySnapshot(remote.data || {});
   if (remote.updated_at) setRaw(markerKey(activeSpace.space_id), remote.updated_at);
-  location.reload();
+  refreshAppInPlace();
 }
 
 cloudApplyRemote.addEventListener('click', () => {
@@ -344,7 +347,7 @@ cloudApplyRemote.addEventListener('click', () => {
   const remote = pendingRemote;
   pendingRemote = null;
   cloudApplyRemote.hidden = true;
-  applyRemoteAndReload(remote);
+  applyRemoteInPlace(remote);
 });
 cloudBar.querySelector('#cloudManage').addEventListener('click', () => { lockApp(); spacesHtml(); });
 cloudBar.querySelector('#cloudLogout').addEventListener('click', async () => {
