@@ -1,4 +1,4 @@
-const CACHE="our-schedule-cloud-v16-20260829";
+const CACHE="our-schedule-cloud-v17-20260829";
 const ASSETS=["./manifest.json","./icon.svg","./cloud.css","./cloud.js"];
 
 self.addEventListener("install",event=>{
