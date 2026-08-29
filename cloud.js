@@ -133,7 +133,7 @@ function urlBase64ToUint8Array(base64String) {
 }
 function eventMap(events) { return new Map((Array.isArray(events) ? events : []).map(e => [String(e.id), e])); }
 function diaryState(data){return data&&typeof data==='object'?JSON.parse(JSON.stringify(data)):{};}
-function detectDiaryChanges(before,after){const changes=[];const dates=new Set([...Object.keys(before||{}),...Object.keys(after||{})]);for(const date of dates){for(const owner of ['ling','sheng']){const b=before?.[date]?.[owner]||null,a=after?.[date]?.[owner]||null;if(JSON.stringify(b)===JSON.stringify(a))continue;changes.push({date,owner,action:a?'added':'deleted',mood:a?.mood||''})}}return changes;}
+function detectDiaryChanges(before,after){const changes=[];const dates=new Set([...Object.keys(before||{}),...Object.keys(after||{})]);for(const date of dates){for(const owner of ['ling','sheng']){const b=before?.[date]?.[owner]||null,a=after?.[date]?.[owner]||null;if(JSON.stringify(b)===JSON.stringify(a))continue;const action=!b&&a?'added':b&&!a?'deleted':'updated';changes.push({date,owner,action,mood:a?.mood||b?.mood||''})}}return changes;}
 function detectEventChange(beforeMap, afterEvents) {
   const afterMap = eventMap(afterEvents);
   const changes = [];
@@ -422,7 +422,7 @@ async function pushSnapshot() {
     if (diff.changes.length > 0 && diff.changes.length <= 3) {
       for (const change of diff.changes) await sendSchedulePush(change);
     }
-    if(diaryDiff.length>0&&diaryDiff.length<=2){for(const d of diaryDiff){await sendSchedulePush({action:d.action,event:{id:`diary-${d.date}-${d.owner}`,name:`📖 ${d.owner==='ling'?'鈴':'生'}的日記 ${d.mood||''}`,startDate:d.date,allDay:true}})}}
+    if(diaryDiff.length>0&&diaryDiff.length<=2){for(const d of diaryDiff){await sendSchedulePush({action:d.action,event:{id:`diary-${d.date}-${d.owner}`,name:`[DIARY:${d.owner}:${d.action}] ${d.mood||''}`,startDate:d.date,allDay:true}})}}
     lastDiaryState=diaryState(snap.diary||{});
     setStatus('synced', '已同步');
   } catch (error) {
