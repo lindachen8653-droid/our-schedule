@@ -1,0 +1,47 @@
+name: Apply cloud shared-space upgrade
+
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - "cloud.js"
+      - "cloud.css"
+      - ".github/workflows/apply-cloud-upgrade.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Inject cloud client into app
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          p = Path('index.html')
+          text = p.read_text(encoding='utf-8')
+          if 'cloud.css' not in text:
+              marker = '<link rel="apple-touch-icon" href="icon.svg" />'
+              text = text.replace(marker, marker + '\n  <link rel="stylesheet" href="./cloud.css?v=20260829-1" />')
+          if 'cloud.js' not in text:
+              text = text.replace('</body>', '<script type="module" src="./cloud.js?v=20260829-1"></script>\n</body>')
+          p.write_text(text, encoding='utf-8')
+
+          sw = Path('sw.js')
+          s = sw.read_text(encoding='utf-8')
+          s = re.sub(r'const CACHE="[^"]+";', 'const CACHE="our-schedule-cloud-v9-20260829";', s, count=1)
+          s = re.sub(r'const ASSETS=\[[^\n]+\];', 'const ASSETS=["./manifest.json","./icon.svg","./cloud.css","./cloud.js"];', s, count=1)
+          sw.write_text(s, encoding='utf-8')
+          PY
+      - name: Commit cloud integration
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add index.html sw.js
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m "Connect Our Schedule to Supabase cloud"
+          git push
