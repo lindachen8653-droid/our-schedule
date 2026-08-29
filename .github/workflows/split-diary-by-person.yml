@@ -1,0 +1,51 @@
+name: Split diary by person
+on:
+  push:
+    branches: ["main"]
+    paths: [".github/workflows/split-diary-by-person.yml"]
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Upgrade diary to two entries per day
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('index.html')
+          s=p.read_text(encoding='utf-8')
+
+          s=s.replace('.diary-trigger{position:absolute;right:4px;top:3px;border:0;background:transparent;padding:2px;font-size:14px;z-index:3;line-height:1}', '.diary-trigger{position:absolute;right:3px;top:3px;border:0;background:transparent;padding:2px;font-size:10px;z-index:3;line-height:1.15;text-align:right;white-space:nowrap}',1)
+          s=s.replace('.diary-date{font-size:13px;color:var(--muted);margin-top:-5px}', '.diary-date{font-size:13px;color:var(--muted);margin-top:-5px}.diary-owner-tabs{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:12px 0}.diary-owner-btn{border:1px solid var(--line);background:#fff;border-radius:16px;padding:10px;font-weight:750}.diary-owner-btn.on{background:#655757;color:#fff;border-color:#655757}',1)
+
+          s=s.replace('<div id="diaryDate" class="diary-date"></div><label id="diaryPhotoBox"', '<div id="diaryDate" class="diary-date"></div><div id="diaryOwnerTabs" class="diary-owner-tabs"><button class="diary-owner-btn on" type="button" data-diary-owner="ling">🎀 鈴</button><button class="diary-owner-btn" type="button" data-diary-owner="sheng">🐶 生</button></div><label id="diaryPhotoBox"',1)
+
+          start=s.index("const DIARY_MOODS=['😃','😡','💔','😔','🙂','🫠'];")
+          end=s.index("$('#calendarGrid').addEventListener('click',e=>",start)
+          old=s[start:end]
+          new='''const DIARY_MOODS=['😃','😡','💔','😔','🙂','🫠'];let diaryEditingDate='',diaryEditingOwner='ling';function diaryData(){return safeParse(STORAGE.diary,{})||{}}function normalizedDiaryDay(ds){const raw=diaryData()[ds];if(!raw)return {ling:null,sheng:null};if(raw.ling||raw.sheng)return {ling:raw.ling||null,sheng:raw.sheng||null};return {ling:raw,sheng:null}}function diaryMood(ds){const d=normalizedDiaryDay(ds),l=d.ling?.mood||'📖',sh=d.sheng?.mood||'📖';return `🎀${l} 🐶${sh}`}function saveDiaryData(data){localStorage.setItem(STORAGE.diary,JSON.stringify(data));refreshAll()}function renderDiaryOwner(){const day=normalizedDiaryDay(diaryEditingDate),d=day[diaryEditingOwner]||{photo:'',text:'',mood:''};$('#diaryOwnerTabs').querySelectorAll('[data-diary-owner]').forEach(b=>b.classList.toggle('on',b.dataset.diaryOwner===diaryEditingOwner));$('#diaryText').value=d.text||'';$('#diaryPhotoBox').innerHTML=d.photo?`<img src="${d.photo}" alt="日記照片"><input id="diaryPhotoInput" type="file" accept="image/*" hidden>`:'<span>📷 加入照片</span><input id="diaryPhotoInput" type="file" accept="image/*" hidden>';$('#moodPicker').innerHTML=DIARY_MOODS.map(m=>`<button class="mood-btn ${d.mood===m?'on':''}" type="button" data-mood="${m}">${m}</button>`).join('');$('#diaryDelete').style.visibility=d?'visible':'hidden'}function openDiary(ds,owner='ling'){diaryEditingDate=ds;diaryEditingOwner=owner;$('#diaryDate').textContent=fmtDay(ds);renderDiaryOwner();$('#diaryModal').classList.add('open');$('#diaryModal').setAttribute('aria-hidden','false');document.body.style.overflow='hidden'}function closeDiary(){$('#diaryModal').classList.remove('open');$('#diaryModal').setAttribute('aria-hidden','true');document.body.style.overflow=''}$('#diaryOwnerTabs').addEventListener('click',e=>{const b=e.target.closest('[data-diary-owner]');if(!b)return;diaryEditingOwner=b.dataset.diaryOwner;renderDiaryOwner()});$('#moodPicker').addEventListener('click',e=>{const b=e.target.closest('[data-mood]');if(!b)return;$('#moodPicker').querySelectorAll('.mood-btn').forEach(x=>x.classList.toggle('on',x===b))});$('#diaryModal').addEventListener('change',async e=>{if(e.target.id!=='diaryPhotoInput')return;const file=e.target.files?.[0];if(!file)return;const data=await compressImage(file,1200,.76);$('#diaryPhotoBox').innerHTML=`<img src="${data}" alt="日記照片"><input id="diaryPhotoInput" type="file" accept="image/*" hidden>`});$('#diarySave').addEventListener('click',()=>{if(!diaryEditingDate)return;const all=diaryData(),day=normalizedDiaryDay(diaryEditingDate),img=$('#diaryPhotoBox img'),m=$('#moodPicker .mood-btn.on');day[diaryEditingOwner]={photo:img?.src||'',text:$('#diaryText').value.trim(),mood:m?.dataset.mood||'',updatedAt:new Date().toISOString()};all[diaryEditingDate]=day;saveDiaryData(all);closeDiary()});$('#diaryDelete').addEventListener('click',()=>{if(!diaryEditingDate||!confirm(`確定刪除${diaryEditingOwner==='ling'?'鈴':'生'}這天的日記？`))return;const all=diaryData(),day=normalizedDiaryDay(diaryEditingDate);day[diaryEditingOwner]=null;if(!day.ling&&!day.sheng)delete all[diaryEditingDate];else all[diaryEditingDate]=day;saveDiaryData(all);renderDiaryOwner()});$('#diaryCloseX').onclick=closeDiary;$('#diaryModal').addEventListener('click',e=>{if(e.target===$('#diaryModal'))closeDiary()});$('#calendarGrid').addEventListener('click',e=>{const b=e.target.closest('[data-diary-date]');if(!b)return;e.stopPropagation();openDiary(b.dataset.diaryDate)},true);'''
+          s=s[:start]+new+s[end:]
+          p.write_text(s,encoding='utf-8')
+
+          sw=Path('sw.js')
+          sw.write_text(sw.read_text(encoding='utf-8').replace('our-schedule-cloud-v23-20260830','our-schedule-cloud-v24-20260830'),encoding='utf-8')
+          PY
+      - name: Validate JavaScript
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+          s=Path('index.html').read_text(encoding='utf-8')
+          for i,b in enumerate(re.findall(r'<script(?![^>]*src=)[^>]*>(.*?)</script>',s,re.S)):
+            Path(f'/tmp/inline-{i}.js').write_text(b,encoding='utf-8')
+          PY
+          for f in /tmp/inline-*.js; do node --check "$f"; done
+      - name: Commit upgrade
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add index.html sw.js
+          git diff --cached --quiet || git commit -m "Add separate daily diaries for Ling and Sheng"
+          git push
