@@ -179,10 +179,41 @@ async function sendSchedulePush(change) {
     await supabase.functions.invoke('send-schedule-push', { body:{ space_id:activeSpace.space_id, action:change.action, event:change.event } });
   } catch {}
 }
-cloudNotify.addEventListener('click', async () => {
+async function getCurrentPushSubscription() {
+  if (!("serviceWorker" in navigator) || !("PushManager" in window)) return null;
+  const reg = await navigator.serviceWorker.ready;
+  return reg.pushManager.getSubscription();
+}
+async function refreshNotifyButton() {
   try {
+    const sub = await getCurrentPushSubscription();
+    cloudNotify.textContent = sub ? "🔔 已開啟" : "🔕 已關閉";
+    cloudNotify.dataset.enabled = sub ? "1" : "0";
+  } catch {
+    cloudNotify.textContent = "🔔 通知";
+    cloudNotify.dataset.enabled = "0";
+  }
+}
+async function disablePushSubscription() {
+  const sub = await getCurrentPushSubscription();
+  if (!sub) { cloudNotify.textContent="🔕 已關閉"; cloudNotify.dataset.enabled="0"; return; }
+  const { error } = await supabase.from("push_subscriptions").delete().eq("endpoint",sub.endpoint).eq("user_id",session.user.id);
+  if (error) throw error;
+  await sub.unsubscribe();
+  cloudNotify.textContent="🔕 已關閉";
+  cloudNotify.dataset.enabled="0";
+}
+cloudNotify.addEventListener("click", async () => {
+  try {
+    const sub = await getCurrentPushSubscription();
+    if (sub) {
+      if (!confirm("要關閉這台裝置的 Our Schedule 通知嗎？之後仍可重新開啟。")) return;
+      await disablePushSubscription();
+      showToast("這台裝置的通知已關閉。");
+      return;
+    }
     const ok = await ensurePushSubscription(true);
-    if (ok) showToast('通知已開啟。對方新增、修改或刪除行程時會收到推播。');
+    if (ok) { cloudNotify.dataset.enabled="1"; showToast("通知已開啟。對方新增、修改或刪除行程時會收到推播。"); }
   } catch (error) { showToast(friendlyError(error)); }
 });
 
@@ -353,11 +384,11 @@ async function hydrateFromCloud(forceRemote = false) {
     setStatus('synced', '已同步');
     lastEventState = eventMap((row.data || {}).events);
     refreshAppInPlace();
-    ensurePushSubscription(false).catch(()=>{});
+    ensurePushSubscription(false).then(refreshNotifyButton).catch(refreshNotifyButton);
     return;
   }
   lastEventState = eventMap((row.data || {}).events);
-  ensurePushSubscription(false).catch(()=>{});
+  ensurePushSubscription(false).then(refreshNotifyButton).catch(refreshNotifyButton);
   setStatus('synced', '已同步');
 }
 function schedulePush() {
