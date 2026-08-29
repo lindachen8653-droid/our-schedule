@@ -7,6 +7,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 });
 
 const AUTH_REDIRECT = 'https://lindachen8653-droid.github.io/our-schedule/';
+const VAPID_PUBLIC_KEY = 'BD1xUc57xHTTJwrcBr83FQS5LAmkBp425Kz9bhxUHvYT0E-uP8vDrD3_J689inMlq9wt4gMvWOLwsjd5WI0Yw50';
 
 const APP_KEYS = {
   events: 'ourSchedule.events.v1',
@@ -31,6 +32,7 @@ let pushTimer = null;
 let suppressPush = false;
 let pendingRemote = null;
 let toastTimer = null;
+let lastEventState = new Map();
 
 function parseJson(value, fallback) {
   try { return value == null ? fallback : JSON.parse(value); } catch { return fallback; }
@@ -108,6 +110,7 @@ cloudBar.innerHTML = `
   </div>
   <div class="cloud-bar-actions">
     <button id="cloudApplyRemote" class="cloud-mini-btn" type="button" hidden>套用更新</button>
+    <button id="cloudNotify" class="cloud-mini-btn" type="button">🔔 通知</button>
     <button id="cloudManage" class="cloud-mini-btn" type="button">共用空間</button>
     <button id="cloudLogout" class="cloud-mini-btn" type="button">登出</button>
   </div>`;
@@ -117,6 +120,72 @@ const cloudDot = cloudBar.querySelector('#cloudDot');
 const cloudSpaceName = cloudBar.querySelector('#cloudSpaceName');
 const cloudStatus = cloudBar.querySelector('#cloudStatus');
 const cloudApplyRemote = cloudBar.querySelector('#cloudApplyRemote');
+const cloudNotify = cloudBar.querySelector('#cloudNotify');
+function urlBase64ToUint8Array(base64String) {
+  const padding = '='.repeat((4 - base64String.length % 4) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const rawData = atob(base64);
+  return Uint8Array.from([...rawData].map(ch => ch.charCodeAt(0)));
+}
+function eventMap(events) { return new Map((Array.isArray(events) ? events : []).map(e => [String(e.id), e])); }
+function detectEventChange(beforeMap, afterEvents) {
+  const afterMap = eventMap(afterEvents);
+  const changes = [];
+  for (const [id, ev] of afterMap) {
+    if (!beforeMap.has(id)) changes.push({ action:'added', event:ev });
+    else if (JSON.stringify(beforeMap.get(id)) !== JSON.stringify(ev)) changes.push({ action:'updated', event:ev });
+  }
+  for (const [id, ev] of beforeMap) if (!afterMap.has(id)) changes.push({ action:'deleted', event:ev });
+  return { changes, afterMap };
+}
+async function savePushSubscription(subscription) {
+  if (!session || !activeSpace || !subscription) return;
+  const json = subscription.toJSON();
+  const { error } = await supabase.from('push_subscriptions').upsert({
+    user_id: session.user.id,
+    space_id: activeSpace.space_id,
+    endpoint: json.endpoint,
+    p256dh: json.keys?.p256dh,
+    auth: json.keys?.auth,
+    updated_at: new Date().toISOString()
+  }, { onConflict: 'endpoint' });
+  if (error) throw error;
+}
+async function ensurePushSubscription(promptUser = false) {
+  if (!session || !activeSpace) return false;
+  if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) {
+    if (promptUser) alert('此瀏覽器目前不支援系統推播。iPhone 請先用 Safari「分享 → 加入主畫面」，再從主畫面開啟 Our Schedule。');
+    return false;
+  }
+  if (Notification.permission === 'denied') {
+    if (promptUser) alert('通知權限目前被關閉，請到 iPhone「設定 → 通知 → Our Schedule」重新開啟。');
+    return false;
+  }
+  if (promptUser && Notification.permission === 'default') {
+    const permission = await Notification.requestPermission();
+    if (permission !== 'granted') return false;
+  }
+  if (Notification.permission !== 'granted') return false;
+  const reg = await navigator.serviceWorker.ready;
+  let sub = await reg.pushManager.getSubscription();
+  if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly:true, applicationServerKey:urlBase64ToUint8Array(VAPID_PUBLIC_KEY) });
+  await savePushSubscription(sub);
+  cloudNotify.textContent = '🔔 已開啟';
+  return true;
+}
+async function sendSchedulePush(change) {
+  if (!change || !activeSpace || !session) return;
+  try {
+    await supabase.functions.invoke('send-schedule-push', { body:{ space_id:activeSpace.space_id, action:change.action, event:change.event } });
+  } catch {}
+}
+cloudNotify.addEventListener('click', async () => {
+  try {
+    const ok = await ensurePushSubscription(true);
+    if (ok) showToast('通知已開啟。對方新增、修改或刪除行程時會收到推播。');
+  } catch (error) { showToast(friendlyError(error)); }
+});
+
 
 function showToast(text) {
   toast.textContent = text;
@@ -282,9 +351,13 @@ async function hydrateFromCloud(forceRemote = false) {
     applySnapshot(row.data || {});
     setRaw(markerKey(activeSpace.space_id), row.updated_at || '');
     setStatus('synced', '已同步');
+    lastEventState = eventMap((row.data || {}).events);
     refreshAppInPlace();
+    ensurePushSubscription(false).catch(()=>{});
     return;
   }
+  lastEventState = eventMap((row.data || {}).events);
+  ensurePushSubscription(false).catch(()=>{});
   setStatus('synced', '已同步');
 }
 function schedulePush() {
@@ -303,6 +376,12 @@ async function pushSnapshot() {
     });
     if (error) throw error;
     if (data) setRaw(markerKey(activeSpace.space_id), String(data));
+    const currentEvents = snapshot().events;
+    const diff = detectEventChange(lastEventState, currentEvents);
+    lastEventState = diff.afterMap;
+    if (diff.changes.length > 0 && diff.changes.length <= 3) {
+      for (const change of diff.changes) await sendSchedulePush(change);
+    }
     setStatus('synced', '已同步');
   } catch (error) {
     setStatus('error', '同步失敗');
@@ -337,9 +416,17 @@ async function subscribeRealtime(spaceId) {
 }
 function applyRemoteInPlace(remote) {
   if (!activeSpace) return;
+  const before = lastEventState;
+  const incomingEvents = Array.isArray(remote.data?.events) ? remote.data.events : [];
+  const diff = detectEventChange(before, incomingEvents);
   applySnapshot(remote.data || {});
+  lastEventState = diff.afterMap;
   if (remote.updated_at) setRaw(markerKey(activeSpace.space_id), remote.updated_at);
   refreshAppInPlace();
+  if (diff.changes.length === 1) {
+    const c=diff.changes[0], verb=c.action==='added'?'新增':c.action==='deleted'?'刪除':'修改';
+    showToast(`🔔 對方${verb}：${c.event?.startDate||''} ${c.event?.name||'行程'}`);
+  }
 }
 
 cloudApplyRemote.addEventListener('click', () => {
