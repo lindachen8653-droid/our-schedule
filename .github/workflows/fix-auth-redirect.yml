@@ -1,0 +1,59 @@
+name: Fix auth redirect
+
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - ".github/workflows/fix-auth-redirect.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch auth redirect
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          p = Path('cloud.js')
+          s = p.read_text(encoding='utf-8')
+          marker = "const APP_KEYS = {"
+          if "const AUTH_REDIRECT" not in s:
+              s = s.replace(marker, "const AUTH_REDIRECT = 'https://lindachen8653-droid.github.io/our-schedule/';\n\n" + marker, 1)
+
+          s = s.replace(
+              "const { data, error } = await supabase.auth.signUp({ email, password });",
+              "const { data, error } = await supabase.auth.signUp({ email, password, options: { emailRedirectTo: AUTH_REDIRECT } });"
+          )
+          s = s.replace(
+              "message.textContent = '註冊完成。請到信箱點擊驗證連結，再回到這裡登入。';",
+              "message.textContent = '註冊完成。請到信箱點擊驗證連結；若你已經驗證過，請直接切換到「已有帳號？登入」。';"
+          )
+          old = "if (/network|fetch/i.test(msg)) return '目前無法連上雲端，請確認網路後再試。';"
+          new = "if (/email rate limit|security purposes|rate limit/i.test(msg)) return '驗證信請求太頻繁，請稍候再試；若已驗證過請直接登入。';\n  " + old
+          if "驗證信請求太頻繁" not in s:
+              s = s.replace(old, new, 1)
+          p.write_text(s, encoding='utf-8')
+
+          ip = Path('index.html')
+          i = ip.read_text(encoding='utf-8')
+          i = i.replace('./cloud.js?v=20260829-1', './cloud.js?v=20260829-2')
+          ip.write_text(i, encoding='utf-8')
+
+          sw = Path('sw.js')
+          w = sw.read_text(encoding='utf-8')
+          import re
+          w = re.sub(r'our-schedule-cloud-v\d+-20260829', 'our-schedule-cloud-v11-20260829', w, count=1)
+          sw.write_text(w, encoding='utf-8')
+          PY
+      - name: Commit patch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add cloud.js index.html sw.js
+          git diff --cached --quiet || git commit -m "Fix Supabase email confirmation redirect"
+          git push
