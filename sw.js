@@ -1,4 +1,4 @@
-const CACHE="our-schedule-v3-20260829";
+const CACHE="our-schedule-v8-20260829";
 const ASSETS=["./manifest.json","./icon.svg"];
 
 self.addEventListener("install",event=>{
