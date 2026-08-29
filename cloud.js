@@ -16,7 +16,8 @@ const APP_KEYS = {
   shopping: 'ourSchedule.shopping.v1',
   tripPhotos: 'ourSchedule.tripPhotos.v1',
   captions: 'ourSchedule.photoCaptions.v1',
-  filters: 'ourSchedule.filters.v1'
+  filters: 'ourSchedule.filters.v1',
+  diary: 'ourSchedule.diary.v1'
 };
 const WATCHED = new Set(Object.values(APP_KEYS));
 const ACTIVE_SPACE_KEY = 'ourSchedule.cloud.activeSpace.v1';
@@ -50,7 +51,8 @@ function snapshot() {
     shoppingList: localStorage.getItem(APP_KEYS.shopping) || '',
     tripPhotos: parseJson(localStorage.getItem(APP_KEYS.tripPhotos), {}),
     photoCaptions: parseJson(localStorage.getItem(APP_KEYS.captions), {}),
-    calendarFilters: parseJson(localStorage.getItem(APP_KEYS.filters), null)
+    calendarFilters: parseJson(localStorage.getItem(APP_KEYS.filters), null),
+    diary: parseJson(localStorage.getItem(APP_KEYS.diary), {})
   };
 }
 function applySnapshot(data) {
@@ -64,6 +66,7 @@ function applySnapshot(data) {
     setRaw(APP_KEYS.tripPhotos, JSON.stringify(s.tripPhotos && typeof s.tripPhotos === 'object' ? s.tripPhotos : {}));
     setRaw(APP_KEYS.captions, JSON.stringify(s.photoCaptions && typeof s.photoCaptions === 'object' ? s.photoCaptions : {}));
     if (Array.isArray(s.calendarFilters)) setRaw(APP_KEYS.filters, JSON.stringify(s.calendarFilters));
+    setRaw(APP_KEYS.diary, JSON.stringify(s.diary && typeof s.diary === 'object' ? s.diary : {}));
   } finally {
     suppressPush = false;
   }
