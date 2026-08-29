@@ -1,0 +1,54 @@
+name: Add diary notifications and reminders
+on:
+  push:
+    branches: ["main"]
+    paths: [".github/workflows/add-diary-notify-reminders.yml"]
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch app
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('index.html'); s=p.read_text(encoding='utf-8')
+          s=s.replace('filters:"ourSchedule.filters.v1"};','filters:"ourSchedule.filters.v1",diary:"ourSchedule.diary.v1"};',1)
+          s=s.replace('<label class="full">備註<textarea id="notes" placeholder="補充資訊"></textarea></label>', '<label class="check full"><input type="checkbox" id="reminderEnabled"> 開啟行程提醒</label><label id="reminderWrap" class="full" style="display:none">提醒時間<select id="reminderMinutes"><option value="0">準時提醒</option><option value="10">10 分鐘前</option><option value="30">30 分鐘前</option><option value="60">1 小時前</option><option value="1440">1 天前</option></select></label><label class="full">備註<textarea id="notes" placeholder="補充資訊"></textarea></label>',1)
+          s=s.replace("$('#notes').value=e.notes||'';$('#deleteEvent')", "$('#notes').value=e.notes||'';$('#reminderEnabled').checked=!!e.reminderEnabled;$('#reminderMinutes').value=String(e.reminderMinutes??30);toggleReminder();$('#deleteEvent')",1)
+          s=s.replace("renderCategoryOptions('ling','ling-work');$('#iconSelect').value='🖥️';toggleTime();openModal()", "renderCategoryOptions('ling','ling-work');$('#iconSelect').value='🖥️';$('#reminderEnabled').checked=false;$('#reminderMinutes').value='30';toggleTime();toggleReminder();openModal()",1)
+          s=s.replace("$('#allDay').addEventListener('change',toggleTime);function toggleTime()", "$('#allDay').addEventListener('change',toggleTime);$('#reminderEnabled').addEventListener('change',toggleReminder);function toggleReminder(){$('#reminderWrap').style.display=$('#reminderEnabled').checked?'block':'none'}function toggleTime()",1)
+          s=s.replace("notes:$('#notes').value.trim()};", "notes:$('#notes').value.trim(),reminderEnabled:$('#reminderEnabled').checked,reminderMinutes:Number($('#reminderMinutes').value||30)};",1)
+          p.write_text(s,encoding='utf-8')
+
+          c=Path('cloud.js'); x=c.read_text(encoding='utf-8')
+          x=x.replace('let lastEventState = new Map();','let lastEventState = new Map();\nlet lastDiaryState = {};',1)
+          x=x.replace("function eventMap(events) { return new Map((Array.isArray(events) ? events : []).map(e => [String(e.id), e])); }", "function eventMap(events) { return new Map((Array.isArray(events) ? events : []).map(e => [String(e.id), e])); }\nfunction diaryState(data){return data&&typeof data==='object'?JSON.parse(JSON.stringify(data)):{};}\nfunction detectDiaryChanges(before,after){const changes=[];const dates=new Set([...Object.keys(before||{}),...Object.keys(after||{})]);for(const date of dates){for(const owner of ['ling','sheng']){const b=before?.[date]?.[owner]||null,a=after?.[date]?.[owner]||null;if(JSON.stringify(b)===JSON.stringify(a))continue;changes.push({date,owner,action:a?'added':'deleted',mood:a?.mood||''})}}return changes;}",1)
+          x=x.replace("lastEventState = eventMap((row.data || {}).events);\n    refreshAppInPlace();", "lastEventState = eventMap((row.data || {}).events);\n    lastDiaryState = diaryState((row.data || {}).diary);\n    refreshAppInPlace();",1)
+          x=x.replace("lastEventState = eventMap((row.data || {}).events);\n  ensurePushSubscription", "lastEventState = eventMap((row.data || {}).events);\n  lastDiaryState = diaryState((row.data || {}).diary);\n  ensurePushSubscription",1)
+          x=x.replace("const currentEvents = snapshot().events;\n    const diff = detectEventChange(lastEventState, currentEvents);", "const snap=snapshot();const currentEvents=snap.events;\n    const diff = detectEventChange(lastEventState, currentEvents);\n    const diaryDiff=detectDiaryChanges(lastDiaryState,snap.diary||{});",1)
+          x=x.replace("for (const change of diff.changes) await sendSchedulePush(change);\n    }", "for (const change of diff.changes) await sendSchedulePush(change);\n    }\n    if(diaryDiff.length>0&&diaryDiff.length<=2){for(const d of diaryDiff){await sendSchedulePush({action:d.action,event:{id:`diary-${d.date}-${d.owner}`,name:`📖 ${d.owner==='ling'?'鈴':'生'}的日記 ${d.mood||''}`,startDate:d.date,allDay:true}})}}\n    lastDiaryState=diaryState(snap.diary||{});",1)
+          x=x.replace("lastEventState = diff.afterMap;\n  if (remote.updated_at)", "lastEventState = diff.afterMap;\n  lastDiaryState=diaryState(remote.data?.diary||{});\n  if (remote.updated_at)",1)
+          c.write_text(x,encoding='utf-8')
+
+          sw=Path('sw.js'); sw.write_text(sw.read_text(encoding='utf-8').replace('our-schedule-cloud-v27-20260830','our-schedule-cloud-v28-20260830'),encoding='utf-8')
+          PY
+      - name: Validate
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+          s=Path('index.html').read_text(encoding='utf-8')
+          for i,b in enumerate(re.findall(r'<script(?![^>]*src=)[^>]*>(.*?)</script>',s,re.S)): Path(f'/tmp/i{i}.js').write_text(b,encoding='utf-8')
+          PY
+          for f in /tmp/i*.js; do node --check "$f"; done
+          node --check cloud.js
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add index.html cloud.js sw.js
+          git commit -m "Add diary notifications and optional event reminders"
+          git push
