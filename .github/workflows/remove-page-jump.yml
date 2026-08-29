@@ -1,0 +1,55 @@
+name: Remove page jump
+
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - ".github/workflows/remove-page-jump.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch cloud sync without page reload
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          cloud = Path('cloud.js')
+          s = cloud.read_text(encoding='utf-8')
+          anchor = "function clearLocalAppData() {"
+          helper = "function refreshAppInPlace() {\n  window.dispatchEvent(new CustomEvent('ourschedule:cloud-data'));\n}\n"
+          if helper not in s:
+              if anchor not in s:
+                  raise SystemExit('cloud anchor not found')
+              s = s.replace(anchor, helper + anchor, 1)
+          s = s.replace('location.reload();', 'refreshAppInPlace();')
+          s = s.replace('applyRemoteAndReload', 'applyRemoteInPlace')
+          cloud.write_text(s, encoding='utf-8')
+
+          index = Path('index.html')
+          h = index.read_text(encoding='utf-8')
+          old = "function refreshAll(){renderDashboard();renderCalendar();renderOverview();renderTravel()}"
+          new = "function refreshAll(){renderDashboard();renderCalendar();renderOverview();renderTravel()}function refreshFromCloud(){events=safeParse(STORAGE.events,[]);todos=safeParse(STORAGE.todos,[]);const savedFilters=safeParse(STORAGE.filters,null);if(Array.isArray(savedFilters))filters=savedFilters;$('#memoText').value=localStorage.getItem(STORAGE.memo)||'';$('#shoppingList').value=localStorage.getItem(STORAGE.shopping)||'';refreshAll()}window.addEventListener('ourschedule:cloud-data',refreshFromCloud)"
+          if old not in h and 'ourschedule:cloud-data' not in h:
+              raise SystemExit('index refresh anchor not found')
+          if 'ourschedule:cloud-data' not in h:
+              h = h.replace(old, new, 1)
+          h = h.replace('./cloud.js?v=20260829-2', './cloud.js?v=20260829-3')
+          index.write_text(h, encoding='utf-8')
+
+          sw = Path('sw.js')
+          w = sw.read_text(encoding='utf-8').replace('our-schedule-cloud-v11-20260829','our-schedule-cloud-v12-20260829')
+          sw.write_text(w, encoding='utf-8')
+          PY
+      - name: Commit patch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add cloud.js index.html sw.js
+          git diff --cached --quiet || git commit -m "Remove cloud sync page reloads"
+          git push
