@@ -1,0 +1,42 @@
+name: Hide past overview events
+on:
+  push:
+    branches: ["main"]
+    paths: [".github/workflows/hide-past-overview.yml"]
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Hide past events from overview
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('index.html'); s=p.read_text(encoding='utf-8')
+          old="function renderOverview(){const q=$('#searchInput').value.trim().toLowerCase(),owner=$('#ownerFilter').value,list=sorted(events).filter(e=>(owner==='all'||e.owner===owner)&&(!q||[e.name,e.location,e.notes,(e.tags||[]).join(' ')].join(' ').toLowerCase().includes(q)));"
+          new="function renderOverview(){const q=$('#searchInput').value.trim().toLowerCase(),owner=$('#ownerFilter').value,today=new Date(),todayS=`${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`,list=sorted(events).filter(e=>e.endDate>=todayS&&(owner==='all'||e.owner===owner)&&(!q||[e.name,e.location,e.notes,(e.tags||[]).join(' ')].join(' ').toLowerCase().includes(q)));"
+          if old not in s: raise SystemExit('renderOverview anchor missing')
+          s=s.replace(old,new,1)
+          s=s.replace("navigator.serviceWorker.register('./sw.js?v=20260830-33')","navigator.serviceWorker.register('./sw.js?v=20260830-34')")
+          p.write_text(s,encoding='utf-8')
+          sw=Path('sw.js'); sw.write_text(sw.read_text(encoding='utf-8').replace('our-schedule-cloud-v33-20260830','our-schedule-cloud-v34-20260830'),encoding='utf-8')
+          PY
+      - name: Validate JavaScript
+        run: |
+          node --check sw.js
+          python - <<'PY'
+          from pathlib import Path
+          import re
+          s=Path('index.html').read_text(encoding='utf-8')
+          for i,b in enumerate(re.findall(r'<script(?![^>]*src=)[^>]*>(.*?)</script>',s,re.S)): Path(f'/tmp/i{i}.js').write_text(b,encoding='utf-8')
+          PY
+          for f in /tmp/i*.js; do node --check "$f"; done
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add index.html sw.js
+          git diff --cached --quiet || git commit -m "Hide past events from overview"
+          git push
