@@ -1,0 +1,92 @@
+name: Add calendar diary
+on:
+  push:
+    branches: ["main"]
+    paths: [".github/workflows/add-calendar-diary.yml"]
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Add diary UI and sync
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          # cloud sync
+          cp=Path('cloud.js')
+          c=cp.read_text(encoding='utf-8')
+          c=c.replace("  filters: 'ourSchedule.filters.v1'\n};", "  filters: 'ourSchedule.filters.v1',\n  diary: 'ourSchedule.diary.v1'\n};",1)
+          c=c.replace("    calendarFilters: parseJson(localStorage.getItem(APP_KEYS.filters), null)\n  };", "    calendarFilters: parseJson(localStorage.getItem(APP_KEYS.filters), null),\n    diary: parseJson(localStorage.getItem(APP_KEYS.diary), {})\n  };",1)
+          c=c.replace("    if (Array.isArray(s.calendarFilters)) setRaw(APP_KEYS.filters, JSON.stringify(s.calendarFilters));", "    if (Array.isArray(s.calendarFilters)) setRaw(APP_KEYS.filters, JSON.stringify(s.calendarFilters));\n    setRaw(APP_KEYS.diary, JSON.stringify(s.diary && typeof s.diary === 'object' ? s.diary : {}));",1)
+          cp.write_text(c,encoding='utf-8')
+
+          p=Path('index.html')
+          s=p.read_text(encoding='utf-8')
+
+          # Storage key
+          s=s.replace("filters:'ourSchedule.filters.v1'", "filters:'ourSchedule.filters.v1',diary:'ourSchedule.diary.v1'",1)
+
+          # Diary CSS before media query
+          diary_css='''.diary-trigger{position:absolute;right:4px;top:3px;border:0;background:transparent;padding:2px;font-size:14px;z-index:3;line-height:1}.diary-modal{width:min(560px,100%);max-height:88vh;overflow:auto;background:#fff;border-radius:24px 24px 0 0;padding:18px;position:relative}.diary-photo{width:100%;aspect-ratio:4/3;border:1px dashed #d9c7c7;border-radius:20px;background:#fff9fa;display:flex;align-items:center;justify-content:center;overflow:hidden;color:var(--muted);margin:8px 0 12px;cursor:pointer}.diary-photo img{width:100%;height:100%;object-fit:cover}.diary-text{min-height:150px;margin-bottom:14px}.mood-title{font-weight:750;margin:4px 0 9px}.mood-picker{display:grid;grid-template-columns:repeat(6,1fr);gap:7px}.mood-btn{border:1px solid var(--line);background:#fff;border-radius:16px;padding:10px 3px;font-size:25px}.mood-btn.on{background:#f7e8ec;border-color:#caaeb7;transform:scale(1.04)}.diary-actions{display:flex;justify-content:space-between;gap:9px;margin-top:15px}.diary-date{font-size:13px;color:var(--muted);margin-top:-5px}'''
+          marker='@media(max-width:720px)'
+          if marker not in s: raise SystemExit('media marker missing')
+          s=s.replace(marker,diary_css+marker,1)
+
+          # Add modal before day list modal / script area
+          diary_html='''<div id="diaryModal" class="modal-backdrop" aria-hidden="true"><div class="diary-modal" role="dialog" aria-modal="true"><button id="diaryCloseX" class="modal-x" aria-label="關閉">×</button><h3 style="margin:4px 0 2px">📖 當日日記</h3><div id="diaryDate" class="diary-date"></div><label id="diaryPhotoBox" class="diary-photo"><span>📷 加入照片</span><input id="diaryPhotoInput" type="file" accept="image/*" hidden></label><textarea id="diaryText" class="diary-text" placeholder="今天發生了什麼？"></textarea><div class="mood-title">今天的心情</div><div id="moodPicker" class="mood-picker"></div><div class="diary-actions"><button id="diaryDelete" class="danger" type="button">刪除日記</button><button id="diarySave" class="primary" type="button">儲存日記</button></div></div></div>'''
+          if 'id="diaryModal"' not in s:
+              s=s.replace('<div id="dayListModal"', diary_html+'<div id="dayListModal"',1)
+
+          # Add diary trigger to each non-empty day after date span. Works with current calendar template.
+          # Locate a common calendar-cell fragment containing class=date and ds.
+          patterns=[
+            ('<div class="date">${d}</div>', '<div class="date">${d}</div><button class="diary-trigger" type="button" data-diary-date="${ds}" aria-label="日記">${diaryMood(ds)}</button>'),
+            ('<div class=date>${d}</div>', '<div class=date>${d}</div><button class="diary-trigger" type="button" data-diary-date="${ds}" aria-label="日記">${diaryMood(ds)}</button>')
+          ]
+          changed=False
+          for old,new in patterns:
+              if old in s:
+                  s=s.replace(old,new)
+                  changed=True
+          if not changed:
+              # More tolerant replacement inside template literal.
+              s2,n=re.subn(r'(<div class=["\']date["\']>\$\{d\}</div>)', r'\1<button class="diary-trigger" type="button" data-diary-date="${ds}" aria-label="日記">${diaryMood(ds)}</button>', s)
+              s=s2; changed=n>0
+          if not changed: raise SystemExit('calendar date template anchor missing')
+
+          # Insert diary JS before calendar click handler
+          anchor="$('#calendarGrid').addEventListener('click',e=>"
+          pos=s.find(anchor)
+          if pos<0: raise SystemExit('calendar click anchor missing')
+          diary_js='''const DIARY_MOODS=['😃','😡','💔','😔','🙂','🫠'];let diaryEditingDate='';function diaryData(){return safeParse(STORAGE.diary,{})||{}}function diaryMood(ds){const d=diaryData()[ds];return d&&d.mood?d.mood:'📖'}function saveDiaryData(data){localStorage.setItem(STORAGE.diary,JSON.stringify(data));refreshAll()}function openDiary(ds){diaryEditingDate=ds;const all=diaryData(),d=all[ds]||{photo:'',text:'',mood:''};$('#diaryDate').textContent=fmtDay(ds);$('#diaryText').value=d.text||'';$('#diaryPhotoBox').innerHTML=d.photo?`<img src="${d.photo}" alt="日記照片"><input id="diaryPhotoInput" type="file" accept="image/*" hidden>`:'<span>📷 加入照片</span><input id="diaryPhotoInput" type="file" accept="image/*" hidden>';$('#moodPicker').innerHTML=DIARY_MOODS.map(m=>`<button class="mood-btn ${d.mood===m?'on':''}" type="button" data-mood="${m}">${m}</button>`).join('');$('#diaryDelete').style.visibility=all[ds]?'visible':'hidden';$('#diaryModal').classList.add('open');$('#diaryModal').setAttribute('aria-hidden','false');document.body.style.overflow='hidden'}function closeDiary(){$('#diaryModal').classList.remove('open');$('#diaryModal').setAttribute('aria-hidden','true');document.body.style.overflow=''}$('#moodPicker').addEventListener('click',e=>{const b=e.target.closest('[data-mood]');if(!b)return;$('#moodPicker').querySelectorAll('.mood-btn').forEach(x=>x.classList.toggle('on',x===b))});$('#diaryModal').addEventListener('change',async e=>{if(e.target.id!=='diaryPhotoInput')return;const file=e.target.files?.[0];if(!file)return;const data=await compressImage(file,1200,.76);$('#diaryPhotoBox').innerHTML=`<img src="${data}" alt="日記照片"><input id="diaryPhotoInput" type="file" accept="image/*" hidden>`});$('#diarySave').addEventListener('click',()=>{if(!diaryEditingDate)return;const all=diaryData(),img=$('#diaryPhotoBox img'),m=$('#moodPicker .mood-btn.on');all[diaryEditingDate]={photo:img?.src||'',text:$('#diaryText').value.trim(),mood:m?.dataset.mood||'',updatedAt:new Date().toISOString()};saveDiaryData(all);closeDiary()});$('#diaryDelete').addEventListener('click',()=>{if(!diaryEditingDate||!confirm('確定刪除這天的日記？'))return;const all=diaryData();delete all[diaryEditingDate];saveDiaryData(all);closeDiary()});$('#diaryCloseX').onclick=closeDiary;$('#diaryModal').addEventListener('click',e=>{if(e.target===$('#diaryModal'))closeDiary()});$('#calendarGrid').addEventListener('click',e=>{const b=e.target.closest('[data-diary-date]');if(!b)return;e.stopPropagation();openDiary(b.dataset.diaryDate)},true);'''
+          s=s[:pos]+diary_js+s[pos:]
+
+          # Cloud refresh should refresh diary automatically because renderCalendar reads localStorage; no extra variable needed.
+          p.write_text(s,encoding='utf-8')
+
+          sw=Path('sw.js')
+          w=sw.read_text(encoding='utf-8').replace('our-schedule-cloud-v22-20260830','our-schedule-cloud-v23-20260830')
+          sw.write_text(w,encoding='utf-8')
+          PY
+      - name: Validate JS
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+          s=Path('index.html').read_text(encoding='utf-8')
+          for i,b in enumerate(re.findall(r'<script(?![^>]*src=)[^>]*>(.*?)</script>',s,re.S)):
+            Path(f'/tmp/inline-{i}.js').write_text(b,encoding='utf-8')
+          PY
+          for f in /tmp/inline-*.js; do node --check "$f"; done
+          node --check cloud.js
+      - name: Commit diary feature
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add index.html cloud.js sw.js
+          git diff --cached --quiet || git commit -m "Add shared calendar diary"
+          git push
