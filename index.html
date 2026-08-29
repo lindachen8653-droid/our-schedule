@@ -10,6 +10,7 @@
   <link rel="manifest" href="manifest.json" />
   <link rel="icon" href="icon.svg" type="image/svg+xml" />
   <link rel="apple-touch-icon" href="icon.svg" />
+  <link rel="stylesheet" href="./cloud.css?v=20260829-1" />
   <title>Our Schedule</title>
   <style>
     :root{--bg:#fffaf6;--card:#fff;--ink:#443d3d;--muted:#8b8080;--line:#eadfda;--shadow:0 10px 30px rgba(92,67,67,.08);--ling:#f7cfdc;--sheng:#cfe3f8;--shared:#f6e5a9}
@@ -55,4 +56,5 @@ $('#exportBackup').onclick=()=>{const data={version:1,exportedAt:new Date().toIS
 function initOptions(){$('#category').innerHTML=CATEGORIES.map(c=>`<option value="${c.id}">${esc(c.label)}（${ownerLabel(c.owner)}）</option>`).join('');$('#iconSelect').innerHTML=ICONS.map(i=>`<option value="${esc(i)}">${esc(i)}</option>`).join('')}function refreshAll(){renderDashboard();renderCalendar();renderOverview();renderTravel()}window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();deferredPrompt=e;$('#installBtn').style.display='inline-block'});$('#installBtn').onclick=async()=>{if(deferredPrompt){deferredPrompt.prompt();await deferredPrompt.userChoice;deferredPrompt=null;$('#installBtn').style.display='none'}else alert('iPhone：Safari → 分享 → 加入主畫面。')};if('serviceWorker'in navigator)window.addEventListener('load',()=>navigator.serviceWorker.register('./sw.js').catch(()=>{}));initOptions();refreshAll();
 })();
 </script>
+<script type="module" src="./cloud.js?v=20260829-1"></script>
 </body></html>

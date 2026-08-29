@@ -1,5 +1,5 @@
-const CACHE="our-schedule-v8-20260829";
-const ASSETS=["./manifest.json","./icon.svg"];
+const CACHE="our-schedule-cloud-v9-20260829";
+const ASSETS=["./manifest.json","./icon.svg","./cloud.css","./cloud.js"];
 
 self.addEventListener("install",event=>{
   event.waitUntil(
