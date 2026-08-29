@@ -34,6 +34,7 @@ let suppressPush = false;
 let pendingRemote = null;
 let toastTimer = null;
 let lastEventState = new Map();
+let lastDiaryState = {};
 
 function parseJson(value, fallback) {
   try { return value == null ? fallback : JSON.parse(value); } catch { return fallback; }
@@ -131,6 +132,8 @@ function urlBase64ToUint8Array(base64String) {
   return Uint8Array.from([...rawData].map(ch => ch.charCodeAt(0)));
 }
 function eventMap(events) { return new Map((Array.isArray(events) ? events : []).map(e => [String(e.id), e])); }
+function diaryState(data){return data&&typeof data==='object'?JSON.parse(JSON.stringify(data)):{};}
+function detectDiaryChanges(before,after){const changes=[];const dates=new Set([...Object.keys(before||{}),...Object.keys(after||{})]);for(const date of dates){for(const owner of ['ling','sheng']){const b=before?.[date]?.[owner]||null,a=after?.[date]?.[owner]||null;if(JSON.stringify(b)===JSON.stringify(a))continue;changes.push({date,owner,action:a?'added':'deleted',mood:a?.mood||''})}}return changes;}
 function detectEventChange(beforeMap, afterEvents) {
   const afterMap = eventMap(afterEvents);
   const changes = [];
@@ -386,11 +389,13 @@ async function hydrateFromCloud(forceRemote = false) {
     setRaw(markerKey(activeSpace.space_id), row.updated_at || '');
     setStatus('synced', '已同步');
     lastEventState = eventMap((row.data || {}).events);
+    lastDiaryState = diaryState((row.data || {}).diary);
     refreshAppInPlace();
     ensurePushSubscription(false).then(refreshNotifyButton).catch(refreshNotifyButton);
     return;
   }
   lastEventState = eventMap((row.data || {}).events);
+  lastDiaryState = diaryState((row.data || {}).diary);
   ensurePushSubscription(false).then(refreshNotifyButton).catch(refreshNotifyButton);
   setStatus('synced', '已同步');
 }
@@ -410,12 +415,15 @@ async function pushSnapshot() {
     });
     if (error) throw error;
     if (data) setRaw(markerKey(activeSpace.space_id), String(data));
-    const currentEvents = snapshot().events;
+    const snap=snapshot();const currentEvents=snap.events;
     const diff = detectEventChange(lastEventState, currentEvents);
+    const diaryDiff=detectDiaryChanges(lastDiaryState,snap.diary||{});
     lastEventState = diff.afterMap;
     if (diff.changes.length > 0 && diff.changes.length <= 3) {
       for (const change of diff.changes) await sendSchedulePush(change);
     }
+    if(diaryDiff.length>0&&diaryDiff.length<=2){for(const d of diaryDiff){await sendSchedulePush({action:d.action,event:{id:`diary-${d.date}-${d.owner}`,name:`📖 ${d.owner==='ling'?'鈴':'生'}的日記 ${d.mood||''}`,startDate:d.date,allDay:true}})}}
+    lastDiaryState=diaryState(snap.diary||{});
     setStatus('synced', '已同步');
   } catch (error) {
     setStatus('error', '同步失敗');
@@ -455,6 +463,7 @@ function applyRemoteInPlace(remote) {
   const diff = detectEventChange(before, incomingEvents);
   applySnapshot(remote.data || {});
   lastEventState = diff.afterMap;
+  lastDiaryState=diaryState(remote.data?.diary||{});
   if (remote.updated_at) setRaw(markerKey(activeSpace.space_id), remote.updated_at);
   refreshAppInPlace();
   if (diff.changes.length === 1) {
