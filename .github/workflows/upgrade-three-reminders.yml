@@ -1,0 +1,56 @@
+name: Upgrade three reminders
+on:
+  push:
+    branches: ["main"]
+    paths: [".github/workflows/upgrade-three-reminders.yml"]
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Upgrade reminder UI and data
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('index.html'); s=p.read_text(encoding='utf-8')
+          old='<label class="check full"><input type="checkbox" id="reminderEnabled"> 開啟行程提醒</label><label id="reminderWrap" class="full" style="display:none">提醒時間<select id="reminderMinutes"><option value="0">準時提醒</option><option value="10">10 分鐘前</option><option value="30">30 分鐘前</option><option value="60">1 小時前</option><option value="1440">1 天前</option><option value="custom">自訂時間</option></select><div id="customReminderWrap" style="display:none;margin-top:8px"><input id="customReminderMinutes" type="number" min="1" max="10080" step="1" inputmode="numeric" placeholder="輸入幾分鐘前，例如 45"><div class="small" style="margin-top:4px">最多可設定 10080 分鐘（7 天）前</div></div></label>'
+          new='<label class="check full"><input type="checkbox" id="reminderEnabled"> 開啟行程提醒</label><div id="reminderWrap" class="full" style="display:none"><div id="reminderRows"></div><button id="addReminder" class="ghost" type="button" style="margin-top:8px">＋ 新增提醒</button><div class="small" style="margin-top:6px">每筆行程最多可設定 3 個提醒。</div></div>'
+          if old not in s: raise SystemExit('reminder html anchor missing')
+          s=s.replace(old,new,1)
+          css='.reminder-row{display:grid;grid-template-columns:1fr auto;gap:8px;align-items:start;margin-top:8px}.reminder-row:first-child{margin-top:0}.reminder-main{display:grid;gap:8px}.reminder-remove{border:1px solid var(--line);background:#fff;border-radius:12px;padding:10px 12px}.reminder-absolute{display:none}'
+          s=s.replace('@media(max-width:720px)',css+'@media(max-width:720px)',1)
+
+          start=s.index('function openNew(ds){')
+          end=s.index("function toggleTime(){",start)
+          oldjs=s[start:end]
+          newjs="""function reminderOptions(value='30'){return `<option value=\"0\" ${value==='0'?'selected':''}>準時提醒</option><option value=\"10\" ${value==='10'?'selected':''}>10 分鐘前</option><option value=\"30\" ${value==='30'?'selected':''}>30 分鐘前</option><option value=\"60\" ${value==='60'?'selected':''}>1 小時前</option><option value=\"1440\" ${value==='1440'?'selected':''}>1 天前</option><option value=\"absolute\" ${value==='absolute'?'selected':''}>自訂日期＋時間</option>`}function addReminderRow(r={mode:'relative',minutes:30,at:''}){const rows=$('#reminderRows');if(rows.children.length>=3)return;const value=r.mode==='absolute'?'absolute':String(r.minutes??30),row=document.createElement('div');row.className='reminder-row';row.innerHTML=`<div class=\"reminder-main\"><select class=\"reminder-type\">${reminderOptions(value)}</select><input class=\"reminder-absolute\" type=\"datetime-local\" value=\"${esc(r.at||'')}\"></div><button class=\"reminder-remove\" type=\"button\">刪除</button>`;rows.appendChild(row);updateReminderRow(row);updateReminderAdd()}function updateReminderRow(row){row.querySelector('.reminder-absolute').style.display=row.querySelector('.reminder-type').value==='absolute'?'block':'none'}function updateReminderAdd(){$('#addReminder').style.display=$('#reminderRows').children.length<3?'inline-block':'none'}function setReminderRows(e=null){$('#reminderRows').innerHTML='';let rs=[];if(Array.isArray(e?.reminders)&&e.reminders.length)rs=e.reminders.slice(0,3);else if(e?.reminderEnabled)rs=[{mode:'relative',minutes:Number(e.reminderMinutes??30)}];if(!rs.length)rs=[{mode:'relative',minutes:30}];rs.forEach(addReminderRow);updateReminderAdd()}function readReminders(){return [...$('#reminderRows').querySelectorAll('.reminder-row')].slice(0,3).map(row=>{const type=row.querySelector('.reminder-type').value;if(type==='absolute')return {mode:'absolute',at:row.querySelector('.reminder-absolute').value};return {mode:'relative',minutes:Number(type)}}).filter(r=>r.mode!=='absolute'||r.at)}function openNew(ds){$('#modalTitle').textContent='新增行程';$('#eventForm').reset();$('#eventId').value='';$('#deleteEvent').style.display='none';$('#startDate').value=ds||'2026-09-01';$('#endDate').value=ds||'2026-09-01';$('#categoryOwner').value='ling';renderCategoryOptions('ling','ling-work');$('#iconSelect').value='🖥️';$('#reminderEnabled').checked=false;setReminderRows();toggleTime();toggleReminder();openModal()}function openEdit(id){const e=events.find(x=>x.id===id);if(!e)return;$('#modalTitle').textContent='編輯行程';$('#eventId').value=e.id;$('#startDate').value=e.startDate;$('#endDate').value=e.endDate;$('#allDay').checked=!!e.allDay;$('#startTime').value=e.startTime||'';$('#endTime').value=e.endTime||'';$('#categoryOwner').value=['ling','sheng','shared'].includes(e.owner)?e.owner:'ling';renderCategoryOptions($('#categoryOwner').value,e.category);$('#iconSelect').value=e.icon||'📌';$('#eventName').value=e.name||'';$('#location').value=e.location||'';$('#tags').value=(e.tags||[]).join(', ');$('#notes').value=e.notes||'';$('#reminderEnabled').checked=Array.isArray(e.reminders)?e.reminders.length>0:!!e.reminderEnabled;setReminderRows(e);toggleReminder();$('#deleteEvent').style.display='inline-block';toggleTime();openModal()}function openModal(){$('#eventModal').classList.add('open');$('#eventModal').setAttribute('aria-hidden','false');document.body.style.overflow='hidden'}function closeModal(){$('#eventModal').classList.remove('open');$('#eventModal').setAttribute('aria-hidden','true');document.body.style.overflow=''}$('#fab').onclick=()=>openNew(`2026-${String(currentMonth+1).padStart(2,'0')}-01`);$('#modalClose').onclick=closeModal;$('#cancelEvent').onclick=closeModal;$('#eventModal').addEventListener('click',e=>{if(e.target===$('#eventModal'))closeModal()});document.addEventListener('keydown',e=>{if(e.key==='Escape'&&$('#eventModal').classList.contains('open'))closeModal()});$('#allDay').addEventListener('change',toggleTime);$('#reminderEnabled').addEventListener('change',toggleReminder);$('#addReminder').addEventListener('click',()=>addReminderRow());$('#reminderRows').addEventListener('change',e=>{if(e.target.classList.contains('reminder-type'))updateReminderRow(e.target.closest('.reminder-row'))});$('#reminderRows').addEventListener('click',e=>{const b=e.target.closest('.reminder-remove');if(!b)return;b.closest('.reminder-row').remove();if(!$('#reminderRows').children.length)addReminderRow();updateReminderAdd()});function toggleReminder(){$('#reminderWrap').style.display=$('#reminderEnabled').checked?'block':'none'}"""
+          s=s[:start]+newjs+s[end:]
+
+          oldsave="notes:$('#notes').value.trim(),reminderEnabled:$('#reminderEnabled').checked,reminderMinutes:$('#reminderMinutes').value==='custom'?Math.max(1,Math.min(10080,Number($('#customReminderMinutes').value||30))):Number($('#reminderMinutes').value||30)};"
+          newsave="notes:$('#notes').value.trim(),reminderEnabled:$('#reminderEnabled').checked,reminders:$('#reminderEnabled').checked?readReminders():[]};"
+          if oldsave not in s: raise SystemExit('save anchor missing')
+          s=s.replace(oldsave,newsave,1)
+          s=s.replace("navigator.serviceWorker.register('./sw.js?v=20260830-31')","navigator.serviceWorker.register('./sw.js?v=20260830-32')")
+          s=s.replace('./cloud.js?v=20260830-31','./cloud.js?v=20260830-32')
+          p.write_text(s,encoding='utf-8')
+          sw=Path('sw.js'); sw.write_text(sw.read_text(encoding='utf-8').replace('our-schedule-cloud-v31-20260830','our-schedule-cloud-v32-20260830'),encoding='utf-8')
+          PY
+      - name: Validate JavaScript
+        run: |
+          node --check sw.js
+          python - <<'PY'
+          from pathlib import Path
+          import re
+          s=Path('index.html').read_text(encoding='utf-8')
+          for i,b in enumerate(re.findall(r'<script(?![^>]*src=)[^>]*>(.*?)</script>',s,re.S)): Path(f'/tmp/i{i}.js').write_text(b,encoding='utf-8')
+          PY
+          for f in /tmp/i*.js; do node --check "$f"; done
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add index.html sw.js
+          git diff --cached --quiet || git commit -m "Support three reminders and absolute reminder times"
+          git push
